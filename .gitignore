@@ -1,6 +1,12 @@
 venv/
 /__pycache__/
-
-CLAUDE.md
+.pytest_cache/
 
 mujoco_menagerie/
+
+CLAUDE.md
+yash_notes.md
+
+/runs
+
+

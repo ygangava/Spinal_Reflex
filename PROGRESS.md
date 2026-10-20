@@ -22,6 +22,11 @@ Current stage: 0 — map the loop from memory
   - End effector error should go into event encode
   - joint error - log and see if it is useful or a diagnostic for end effector error later
   - MuJoCo is deterministic for the same initial state on the same machine. robosuite, however, adds initialization noise to the starting joint positions by default, so runs differ unless you pass initialization_noise=None or seed it. Turn it off for the baseline. Your test is to run no-push twice and diff the joint logs. They should match exactly, and the joints should stay nearly constant during a hold.
+  - time window - half open window [t, t+dt) for pushes. avoids double counting at end
+  - half sine push profile - Impulse = F_peak * duration * 2/pi
+  - parameterize by impulse, can ge tpeak froce from that ... duration can vary independlty then and can test short and sharp angainst long and soft pushes with the same impulse. For now, we can just use a short hard push.
+  - initial direction x and y 
+  - seeds - default_rng(seed) - using seperate seeds for training and testing
 
 
 ## Open questions
