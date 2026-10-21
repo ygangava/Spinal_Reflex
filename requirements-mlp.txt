@@ -1,0 +1,8 @@
+# Minimal environment for the existing simulator and the periodic MLP experiment.
+# Python 3.12; the original requirements.txt remains the team's full environment.
+numpy==1.26.4
+mujoco==3.3.7
+scipy==1.17.1
+matplotlib==3.11.2
+pytest==9.1.1
+torch==2.14.1

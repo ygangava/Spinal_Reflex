@@ -1,0 +1,224 @@
+{
+  "model": {
+    "activation": "tanh",
+    "best_epoch": 71,
+    "data_rounds": 2,
+    "dense_macs_per_tick": 2240,
+    "dt": 0.001,
+    "features": "history",
+    "format_version": 1,
+    "gain": 1.0,
+    "hidden": 64,
+    "label": "previous tick -J^T F",
+    "label_delay_ticks": 1,
+    "parameters": 2304,
+    "provenance": {
+      "base_commit": "35247f259bac8c5ccdae4540dd660d01137d73c6",
+      "menagerie_commit": "cda5236f98383f6fbaa4820c6b18dba892cd087f",
+      "source_sha256": {
+        "disturbance.py": "99c572f694b4c556b2c530a20de0a354ccfe4e232f2df7070fda246df5d8f92a",
+        "mlp_reflex.py": "7e637a95c37fcb6a72b426bb396f7fab4ec268707f6840546a29a9c0ea231efe",
+        "osc.py": "45af8ac1d7b62e46ac75813fcb249d8e761e28f4c21b7d740510771aa89e2dbf",
+        "reflex.py": "59491faec06ee218c6b09ab92f5606ce0b1709f6acebb4cedd90125ee2f28cab",
+        "scripts/mlp.py": "c0b258848516293d971a75ae545530ec7975d0e31c7aa1e7a104a1b1d74cf3dd"
+      }
+    },
+    "scope": "home pose; hand pushes; noise-free simulation",
+    "torch_version": "2.14.1",
+    "train_seeds": [
+      0,
+      1,
+      2
+    ],
+    "training_config": {
+      "batch_size": 1024,
+      "epochs_per_round": 80,
+      "learning_rate": 0.002,
+      "loss": "scaled torque MSE",
+      "optimizer": "Adam",
+      "rounds": 2,
+      "teacher_demonstration_delay_ticks": 5
+    },
+    "training_seed": 17,
+    "validation_seeds": [
+      100
+    ]
+  },
+  "evaluation_split": "evaluate",
+  "evaluation_seeds": [
+    200,
+    201
+  ],
+  "additional_output_delay_ticks": 1,
+  "oracle_delay_ticks": 2,
+  "episodes": 488,
+  "controllers": {
+    "impact": {
+      "OSC": {
+        "peak_mm": 30.850652495052454,
+        "auc_mm_s": 7.290428921457175,
+        "pre_push_peak_mm": 4.2272327693068044e-17,
+        "final_mm": 0.04476007188126889,
+        "saturation_fraction": 0.0007375794451044001,
+        "torque_limited_fraction": 0.007533703563149814,
+        "n": 32
+      },
+      "High-KP OSC": {
+        "peak_mm": 22.306280119389633,
+        "auc_mm_s": 2.968104639416259,
+        "pre_push_peak_mm": 3.905187737262421e-17,
+        "final_mm": 0.0007331776360555945,
+        "saturation_fraction": 0.00408584094099868,
+        "torque_limited_fraction": 0.025686030063569457,
+        "n": 32
+      },
+      "MLP": {
+        "peak_mm": 17.568707468280614,
+        "auc_mm_s": 3.898374502360409,
+        "pre_push_peak_mm": 2.7459189294268265e-05,
+        "final_mm": 0.06825412485677884,
+        "saturation_fraction": 0.006262865261380021,
+        "torque_limited_fraction": 0.02478508783235868,
+        "n": 32
+      },
+      "Oracle": {
+        "peak_mm": 17.71955382612994,
+        "auc_mm_s": 3.9575270746067273,
+        "pre_push_peak_mm": 4.2272327693068044e-17,
+        "final_mm": 0.019677344445719152,
+        "saturation_fraction": 0.006154148401762038,
+        "torque_limited_fraction": 0.022887732062044832,
+        "n": 32
+      }
+    },
+    "sustained": {
+      "OSC": {
+        "peak_mm": 28.901823477120317,
+        "auc_mm_s": 8.461866427293256,
+        "pre_push_peak_mm": 4.2272327693068044e-17,
+        "final_mm": 0.03665995715169512,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "n": 32
+      },
+      "High-KP OSC": {
+        "peak_mm": 14.079425940418364,
+        "auc_mm_s": 3.1770036261216665,
+        "pre_push_peak_mm": 3.905187737262421e-17,
+        "final_mm": 0.0004479085661847342,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "n": 32
+      },
+      "MLP": {
+        "peak_mm": 0.7547663736323074,
+        "auc_mm_s": 0.22067877183935183,
+        "pre_push_peak_mm": 2.7459189294268265e-05,
+        "final_mm": 0.00368054801434868,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.007200704560360739,
+        "n": 32
+      },
+      "Oracle": {
+        "peak_mm": 0.6874057469122894,
+        "auc_mm_s": 0.2080368867820605,
+        "pre_push_peak_mm": 4.2272327693068044e-17,
+        "final_mm": 0.00044756931129205874,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.007216358348937432,
+        "n": 32
+      }
+    },
+    "press": {
+      "OSC": {
+        "peak_mm": 43.149414813183135,
+        "auc_mm_s": 110.238080333101,
+        "pre_push_peak_mm": 4.2585918066876754e-17,
+        "final_mm": 0.02972000240166775,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "hold_mm": 43.14878799834482,
+        "n": 56
+      },
+      "High-KP OSC": {
+        "peak_mm": 16.253249543739148,
+        "auc_mm_s": 41.492059062863646,
+        "pre_push_peak_mm": 3.92494210320391e-17,
+        "final_mm": 0.00028511129923350836,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "hold_mm": 16.253242961723068,
+        "n": 56
+      },
+      "MLP": {
+        "peak_mm": 0.4248265833708852,
+        "auc_mm_s": 0.9465179768138394,
+        "pre_push_peak_mm": 2.762755119490828e-05,
+        "final_mm": 0.006593720356746924,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "hold_mm": 0.33274803399136665,
+        "n": 56
+      },
+      "Oracle": {
+        "peak_mm": 0.23838021795400782,
+        "auc_mm_s": 0.1734587020653886,
+        "pre_push_peak_mm": 4.2585918066876754e-17,
+        "final_mm": 0.0003636667531417296,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "hold_mm": 5.99954556862432e-06,
+        "n": 56
+      }
+    },
+    "quiet": {
+      "OSC": {
+        "peak_mm": 5.61803689652078e-17,
+        "auc_mm_s": 5.020494470893626e-17,
+        "pre_push_peak_mm": 3.952877903308411e-17,
+        "final_mm": 5.61803689652078e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "n": 2
+      },
+      "High-KP OSC": {
+        "peak_mm": 4.568644806472689e-17,
+        "auc_mm_s": 4.3554140387592157e-17,
+        "pre_push_peak_mm": 3.756085545025504e-17,
+        "final_mm": 4.568644806472689e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "n": 2
+      },
+      "MLP": {
+        "peak_mm": 3.289957865428674e-05,
+        "auc_mm_s": 3.1102692916106866e-05,
+        "pre_push_peak_mm": 2.6209181332825904e-05,
+        "final_mm": 3.289957865428674e-05,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "n": 2
+      },
+      "Oracle": {
+        "peak_mm": 5.61803689652078e-17,
+        "auc_mm_s": 5.020494470893626e-17,
+        "pre_push_peak_mm": 3.952877903308411e-17,
+        "final_mm": 5.61803689652078e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "n": 2
+      }
+    }
+  },
+  "provenance": {
+    "base_commit": "35247f259bac8c5ccdae4540dd660d01137d73c6",
+    "menagerie_commit": "cda5236f98383f6fbaa4820c6b18dba892cd087f",
+    "source_sha256": {
+      "osc.py": "45af8ac1d7b62e46ac75813fcb249d8e761e28f4c21b7d740510771aa89e2dbf",
+      "disturbance.py": "99c572f694b4c556b2c530a20de0a354ccfe4e232f2df7070fda246df5d8f92a",
+      "reflex.py": "59491faec06ee218c6b09ab92f5606ce0b1709f6acebb4cedd90125ee2f28cab",
+      "mlp_reflex.py": "7e637a95c37fcb6a72b426bb396f7fab4ec268707f6840546a29a9c0ea231efe",
+      "scripts/mlp.py": "c0b258848516293d971a75ae545530ec7975d0e31c7aa1e7a104a1b1d74cf3dd"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 venv/
+.venv/
 /__pycache__/
 __pycache__/
 tests/__pycache__/
@@ -12,5 +13,4 @@ yash_notes.md
 yash_notes/
 
 /runs
-
 

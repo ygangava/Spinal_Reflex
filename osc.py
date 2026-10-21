@@ -196,7 +196,10 @@ def run_episode(p, gains=DEFAULT_GAINS, reflex=None, reflex_gain=1.0, reflex_del
 
             # Reflex sees only what a real robot could sense; only a privileged reflex also gets the teacher
             obs = {"k": k, "q": d.qpos[:7].copy(), "dq": d.qvel[:7].copy(),
-                   "e_p": e_p, "e_o": e_o, "tau_base": tau}
+                   "e_p": e_p, "e_o": e_o, "tau_base": tau,
+                   # Previous applied motor torque is observable, unlike the push force.
+                   # At reset the arm is assumed to be holding its initial bias torque.
+                   "tau_prev": tau.copy() if prev is None else prev.copy()}
             priv = {"tau_teacher": tau_teacher} if reflex.privileged else None
             tau_res_new, est_new = reflex.step(obs, reflex_gain, priv)
             

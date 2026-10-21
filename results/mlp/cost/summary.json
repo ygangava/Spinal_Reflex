@@ -1,0 +1,216 @@
+{
+  "counts": {
+    "architecture": [
+      28,
+      64,
+      7
+    ],
+    "dt_s": 0.001,
+    "ticks_per_s": 1000.0,
+    "dense_layers": [
+      {
+        "shape": [
+          28,
+          64
+        ],
+        "macs_per_tick": 1792
+      },
+      {
+        "shape": [
+          64,
+          7
+        ],
+        "macs_per_tick": 448
+      }
+    ],
+    "dense_macs_per_tick": 2240,
+    "dense_macs_per_s": 2240000.0,
+    "dense_flops_per_tick_2_per_mac_convention": 4480,
+    "dense_flops_per_s_2_per_mac_convention": 4480000.0,
+    "extra_operations_per_tick": {
+      "feature_subtractions": 21,
+      "feature_divisions": 7,
+      "normalization_divisions": 28,
+      "hidden_bias_additions": 64,
+      "tanh_evaluations": 64,
+      "rest_output_subtractions": 7,
+      "output_scale_multiplications": 7,
+      "gain_multiplications": 7,
+      "clip_limit_negations": 7,
+      "clip_comparisons": 14
+    },
+    "full_step_scalar_operations_per_tick": {
+      "multiplications": 2254,
+      "additions": 2233,
+      "subtractions": 28,
+      "divisions": 35,
+      "negations": 7,
+      "comparisons": 14,
+      "tanh_evaluations": 64
+    },
+    "full_step_scalar_operations_per_s": {
+      "multiplications": 2254000.0,
+      "additions": 2233000.0,
+      "subtractions": 28000.0,
+      "divisions": 35000.0,
+      "negations": 7000.0,
+      "comparisons": 14000.0,
+      "tanh_evaluations": 64000.0
+    },
+    "parameters": 2304,
+    "nonzero_weights": 2240,
+    "parameter_bytes": 9216,
+    "parameter_dtype": "float32",
+    "resident_numeric_array_bytes": 9440,
+    "resident_arrays": {
+      "w1": 7168,
+      "b1": 256,
+      "w2": 1792,
+      "x_scale": 112,
+      "y_scale": 28,
+      "torque_limit": 56,
+      "rest_output": 28
+    },
+    "calm_dense_macs_per_s": 2240000.0,
+    "pushed_dense_macs_per_s": 2240000.0,
+    "scope": "MLPReflex.step only; excludes base OSC, physics, IO, actuator limiter, training, allocation and copies"
+  },
+  "benchmark": {
+    "latency": {
+      "network_only": {
+        "all": {
+          "samples": 19760,
+          "mean_us": 3.9126263663967613,
+          "median_us": 3.834,
+          "p95_us": 4.167,
+          "p99_us": 5.125,
+          "observed_max_us": 107.834
+        },
+        "phases": {
+          "calm": {
+            "samples": 8260,
+            "mean_us": 3.87700411622276,
+            "median_us": 3.833,
+            "p95_us": 4.125,
+            "p99_us": 5.0,
+            "observed_max_us": 23.875
+          },
+          "pushed": {
+            "samples": 1500,
+            "mean_us": 3.9642506666666666,
+            "median_us": 3.875,
+            "p95_us": 4.167,
+            "p99_us": 5.458,
+            "observed_max_us": 28.834
+          },
+          "recovery": {
+            "samples": 10000,
+            "mean_us": 3.9343066999999996,
+            "median_us": 3.875,
+            "p95_us": 4.209,
+            "p99_us": 5.166,
+            "observed_max_us": 107.834
+          }
+        },
+        "per_repeat_median_us": [
+          3.833,
+          3.875,
+          3.875,
+          3.875,
+          3.834,
+          3.834,
+          3.792,
+          3.875,
+          3.834,
+          3.792
+        ]
+      },
+      "full_reflex_step": {
+        "all": {
+          "samples": 19760,
+          "mean_us": 6.605694736842104,
+          "median_us": 6.333,
+          "p95_us": 6.91904999999997,
+          "p99_us": 8.25,
+          "observed_max_us": 3973.875
+        },
+        "phases": {
+          "calm": {
+            "samples": 8260,
+            "mean_us": 6.441435593220339,
+            "median_us": 6.375,
+            "p95_us": 7.042,
+            "p99_us": 8.209,
+            "observed_max_us": 123.75
+          },
+          "pushed": {
+            "samples": 1500,
+            "mean_us": 6.3932113333333325,
+            "median_us": 6.292,
+            "p95_us": 6.833,
+            "p99_us": 8.20801,
+            "observed_max_us": 65.167
+          },
+          "recovery": {
+            "samples": 10000,
+            "mean_us": 6.773245300000001,
+            "median_us": 6.292,
+            "p95_us": 6.875,
+            "p99_us": 8.25041000000001,
+            "observed_max_us": 3973.875
+          }
+        },
+        "per_repeat_median_us": [
+          6.083,
+          6.084,
+          6.583,
+          6.167,
+          6.292,
+          6.334,
+          6.5,
+          6.417,
+          6.125,
+          6.208
+        ]
+      }
+    },
+    "timer_pair_overhead": {
+      "samples": 1000,
+      "mean_us": 0.023149999999999997,
+      "median_us": 0.041,
+      "p95_us": 0.042,
+      "p99_us": 0.042,
+      "observed_max_us": 1.0
+    },
+    "warmup_passes": 3,
+    "repeats": 10,
+    "trajectory_ticks": 1976,
+    "input_dtype": "float64",
+    "synthetic_output_delay_ticks": 1,
+    "method": "perf_counter_ns around individual calls; no batching; prebuilt observations; no timer-overhead subtraction",
+    "limits": "Host wall-clock latency only; observed max is not a WCET bound; excludes simulator, sensor acquisition, communication and model loading"
+  },
+  "environment": {
+    "platform": "macOS-26.7.1-arm64-arm-64bit",
+    "architecture": "arm64",
+    "processor": "arm",
+    "python": "3.12.14",
+    "numpy": "1.26.4",
+    "logical_cpus_reported": 18,
+    "blas_thread_environment": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1"
+    },
+    "cpu_model_verified_separately": "Apple M5 Pro",
+    "cpu_model_source": "sysctl -n machdep.cpu.brand_string"
+  },
+  "artifact_bytes": 11164,
+  "model_sha256": "5cfca8ad404747f2d0bfa9a1c0096b87d686a918b12e2a6101943b495967f6d3",
+  "benchmark_source_sha256": "4d6bb089315cbd74c67dfedc2217c7954c12f9370b9818e1ab2deebeb3e28077",
+  "power_watts": null,
+  "energy_joules_per_tick": null,
+  "fpga_resources": null,
+  "fpga_latency_us": null
+}
