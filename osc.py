@@ -15,14 +15,20 @@ import subprocess # for the git
 import json
 import os
 from dataclasses import asdict
+from collections import deque
 
 from disturbance import push, grid_pushes
+from reflex import NoReflex
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(HERE, "mujoco_menagerie/franka_emika_panda/scene.xml")
 # MODEL = "mujoco_menagerie/franka_emika_panda/scene.xml"
 m = mujoco.MjModel.from_xml_path(MODEL) # robot desc that doesn’t change: links, masses, joints, actuators
 d = mujoco.MjData(m) # state that changes every step: joint angles, velocities, forces, positions.
+
+# 1 ms tick to match the Franka's 1 kHz control loop (Menagerie default is 2 ms)
+m.opt.timestep = 0.001
+DT = m.opt.timestep
 
 # Menagerie's arm actuators are position servos (force = kp*(ctrl - q) - kv*qdot).
 '''
@@ -37,6 +43,19 @@ m.actuator_gainprm[:7, :] = 0
 m.actuator_gainprm[:7, 0] = 1
 m.actuator_biasprm[:7, :] = 0
 m.actuator_ctrlrange[:7] = np.c_[-TAU_MAX, TAU_MAX]
+
+# Franka torque-rate limit, every joint (Nm/s). MuJoCo doesn't enforce this, so limit_torque() does
+TAU_RATE_MAX = 1000.0
+
+
+def limit_torque(cmd, prev):
+    # Rate limit against last tick's applied torque, then magnitude limit.
+    # prev is None on the first tick: the arm was already holding this torque before t = 0,
+    # so ramping up from 0 would make it sag under gravity (~25 ticks to reach joint 2's hold torque)
+    if prev is not None:
+        step = TAU_RATE_MAX * DT
+        cmd = prev + np.clip(cmd - prev, -step, step)
+    return np.clip(cmd, -TAU_MAX, TAU_MAX)
 
 # Put Arm in Start pose
 mujoco.mj_resetDataKeyframe(m, d, m.key("home").id)
@@ -112,7 +131,6 @@ def osc(g):
 
 
 # Episode settings
-DT = m.opt.timestep
 T_END = 3.0          # latest onset ~1.5 s + ~0.8 s recovery + margin
 
 # Per-tick log: name -> width. Every row is the state at the START of tick k (before mj_step2)
@@ -120,18 +138,44 @@ LOG_FIELDS = {
     "e_p": 3, "e_o": 3,              # hand position / orientation error
     "ee_pos": 3,                     # hand position (target is x_d, constant for now)
     "q": 7, "dq": 7,                 # joint state
-    "tau_cmd": 7,                    # torque we asked for (base + residual)
-    "tau_applied": 7,                # torque MuJoCo actually applied (after forcerange clip)
+    "tau_base": 7,                   # OSC torque
+    "tau_teacher": 7,                # -J^T F: torque that exactly cancels the push (training label, oracle)
+    "tau_res_new": 7,                # reflex torque computed this tick (after gain), before the latency queue
+    "tau_res": 7,                    # reflex torque applied this tick (computed reflex_delay ticks ago)
+    "reflex_est": 7,                 # reflex's slow disturbance estimate, applied this tick (same delay)
+    "tau_cmd": 7,                    # torque we asked for (base + residual), before any limit
+    "tau_applied": 7,                # torque MuJoCo actually applied (after rate + magnitude limits)
     "f_push": 3,                     # push force this tick, world frame
 }
 
-def run_episode(p, gains=DEFAULT_GAINS, t_end=T_END, viewer=False):
+qfrc_push = np.zeros(m.nv)
+
+
+def teacher_torque(f, body):
+    # joint torque that cancels the push force f,
+    # applied where xfrc_applied acts: the body's COM (xipos, not xpos).
+    # Needs current kinematics, so call after mj_step1
+    # JᵀF depends on the arm's current pose: the Jacobian and xipos are both computed in mj_step1
+
+    qfrc_push[:] = 0 # push stored in joint coordinates, qfrc - generalized force
+    mujoco.mj_applyFT(m, d, f, np.zeros(3), d.xipos[body], body, qfrc_push)
+    return -qfrc_push[:7].copy()
+
+
+def run_episode(p, gains=DEFAULT_GAINS, reflex=None, reflex_gain=1.0, reflex_delay=0, rate_limit=True,
+                t_end=T_END, viewer=False):
     # Fresh start every episode: same pose, zero velocity, zero applied forces
     mujoco.mj_resetDataKeyframe(m, d, m.key("home").id)
     mujoco.mj_forward(m, d)
     body = m.body(p.body).id
     n = round(t_end / DT)
     log = {name: np.zeros((n, w)) for name, w in LOG_FIELDS.items()}
+    reflex = reflex if reflex is not None else NoReflex()
+    reflex.reset()
+    prev = None
+
+    # Latency queue: reflex output computed at tick k is applied at k + reflex_delay. Starts full of zeros
+    queue = deque([(np.zeros(7), np.zeros(7))] * reflex_delay)
 
     # One loop for both modes: nullcontext() stands in for the viewer and yields None
     ctx = mujoco.viewer.launch_passive(m, d) if viewer else contextlib.nullcontext()
@@ -145,19 +189,43 @@ def run_episode(p, gains=DEFAULT_GAINS, t_end=T_END, viewer=False):
             # Controller sees the current state
             mujoco.mj_step1(m, d)
             tau, e_p, e_o = osc(gains)
-            tau_res = np.zeros(7)            # <-- reflex residual goes here
-            d.ctrl[:7] = tau + tau_res
+
+            # Push this tick and the torque that cancels it (before the reflex, so the oracle can use it this tick)
             f = push(k, p)
+            tau_teacher = teacher_torque(f, body)
+
+            # Reflex sees only what a real robot could sense; only a privileged reflex also gets the teacher
+            obs = {"k": k, "q": d.qpos[:7].copy(), "dq": d.qvel[:7].copy(),
+                   "e_p": e_p, "e_o": e_o, "tau_base": tau}
+            priv = {"tau_teacher": tau_teacher} if reflex.privileged else None
+            tau_res_new, est_new = reflex.step(obs, reflex_gain, priv)
+            
+
+            # Latency: everything leaving the reflex is delayed the same
+            # Lumps potnetch sensing -> FPGA -> communication -> motor into one delay on the reflex output
+            # The reflex computes from fresh inputs at tick k; its output is applied at k + D.
+            # For a time-invariant reflex this equals seeing the push D ticks late (only total delay matters).
+
+            queue.append((tau_res_new, est_new))
+            tau_res, est = queue.popleft()
+
+            # Total torque through the Franka's rate and magnitude limits
+            cmd = tau + tau_res
+            applied = limit_torque(cmd, prev if rate_limit else None)
+            prev = applied
+            d.ctrl[:7] = applied
             d.xfrc_applied[body, :3] = f
 
             # Log the start-of-tick state before step2 changes it
             log["e_p"][k], log["e_o"][k] = e_p, e_o
             log["ee_pos"][k] = d.xpos[hand]
             log["q"][k], log["dq"][k] = d.qpos[:7], d.qvel[:7]
-            log["tau_cmd"][k] = d.ctrl[:7]
+            log["tau_base"][k], log["tau_teacher"][k] = tau, tau_teacher
+            log["tau_res_new"][k], log["tau_res"][k], log["reflex_est"][k] = tau_res_new, tau_res, est
+            log["tau_cmd"][k] = cmd
             log["f_push"][k] = f
 
-            # Physics; actuator_force is the clipped torque used during this tick
+            # Physics; actuator_force is the torque actually used during this tick
             mujoco.mj_step2(m, d)
             log["tau_applied"][k] = d.actuator_force[:7]
 
@@ -175,13 +243,17 @@ def git_commit():
     return run("rev-parse", "--short", "HEAD") + ("-dirty" if run("status", "--porcelain") else "")
 
 
-def episode_meta(p, seed, gains):
+def episode_meta(p, seed, gains, reflex_name="none", reflex_gain=1.0, reflex_delay=0, rate_limit=True):
     return {
         "seed": seed,
         "push": asdict(p),
         "dt": DT,
         "gains": gains,
+        "reflex": reflex_name,
+        "reflex_gain": reflex_gain,
+        "reflex_delay_ticks": reflex_delay,
         "tau_max": TAU_MAX.tolist(),
+        "tau_rate_max": TAU_RATE_MAX if rate_limit else None,
         "model": os.path.relpath(MODEL, HERE),
         "mujoco": mujoco.__version__,
         "git": git_commit(),
