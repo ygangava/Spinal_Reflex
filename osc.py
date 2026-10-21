@@ -6,6 +6,7 @@ Model: mujoco_menagerie/franka_emika_panda/scene.xml
 mjpython osc.py
 """
 import mujoco
+import mujoco.viewer  # plain `import mujoco` doesn't load the viewer submodule
 import numpy as np
 import time
 from scipy.spatial.transform import Rotation as R
@@ -50,8 +51,18 @@ q0 = d.qpos[:7].copy()                     # null-space posture target
 # Because F = Lambda * a, the task behaves like a unit mass: kd = 2*sqrt(kp) is critical damping.
 # PID -- P - proportional to error --- hard it pulls back toward the target. Bigger means stiffer.
 # D - derivative of error --- damperit resists velocity so the arm doesn’t oscillate. 2*sqrt(KP) is critical damping, the fastest return with no overshoot
-KP_POS, KP_ORI, KP_NULL = 150.0, 150.0, 10.0
-KD_POS, KD_ORI, KD_NULL = (2 * np.sqrt(k) for k in (KP_POS, KP_ORI, KP_NULL))
+# KP_POS, KP_ORI, KP_NULL = 150.0, 150.0, 10.0
+# KD_POS, KD_ORI, KD_NULL = (2 * np.sqrt(k) for k in (KP_POS, KP_ORI, KP_NULL))
+
+# make gains as parameters
+def make_gains(kp_pos=150.0, kp_ori=150.0, kp_null=10.0):
+    # KD = 2 * sqrt(KP) # critical damping, fastest return with no overshoot
+    return {"kp_pos": kp_pos, "kp_ori": kp_ori, "kp_null": kp_null,
+            "kd_pos": 2 * np.sqrt(kp_pos), "kd_ori": 2 * np.sqrt(kp_ori), "kd_null": 2 * np.sqrt(kp_null)}
+    
+DEFAULT_GAINS = make_gains()
+HIGH_KP_GAINS = make_gains(kp_pos=400.0, kp_ori=300.0, kp_null=20.0)
+
 
 jp = np.zeros((3, m.nv))
 jr = np.zeros((3, m.nv))
@@ -66,7 +77,7 @@ def full_inertia(dst):
         mujoco.mj_fullM(m, d, dst)       # newer MuJoCo (3.16+)
 
 
-def osc():
+def osc(g):
     """Return OSC joint torques (7,) plus position and orientation error."""
     # Jacobian: maps joint velocities -> hand linear (jp) and angular (jr) velocity. Arm = first 7 dofs.
     mujoco.mj_jacBody(m, d, jp, jr, hand)
@@ -82,13 +93,15 @@ def osc():
     R_cur = R.from_matrix(d.xmat[hand].reshape(3, 3))
     e_o = (R.from_matrix(R_d) * R_cur.inv()).as_rotvec()  # world-frame axis*angle from current to target
 
-    a = np.r_[KP_POS * e_p - KD_POS * v[:3],             # desired task acceleration (PD)
-              KP_ORI * e_o - KD_ORI * v[3:]]
+    
+    a = np.r_[g["kp_pos"] * e_p - g["kd_pos"] * v[:3],
+              g["kp_ori"] * e_o - g["kd_ori"] * v[3:]]
+
     F = Lam @ a                                          # task wrench
 
     # Null space: 7 joints vs 6 task dofs leaves 1 dof (elbow swivel). Pull it to q0 without disturbing the hand.
     N = np.eye(7) - J.T @ Lam @ J @ Minv
-    tau_null = M @ (KP_NULL * (q0 - d.qpos[:7]) - KD_NULL * dq)
+    tau_null = M @ (g["kp_null"] * (q0 - d.qpos[:7]) - g["kd_null"] * dq)
 
     tau = J.T @ F + N @ tau_null + d.qfrc_bias[:7]       # qfrc_bias = gravity + Coriolis compensation
     return tau, e_p, e_o
@@ -112,7 +125,7 @@ LOG_FIELDS = {
     "f_push": 3,                     # push force this tick, world frame
 }
 
-def run_episode(p, t_end=T_END, viewer=False):
+def run_episode(p, gains=DEFAULT_GAINS, t_end=T_END, viewer=False):
     # Fresh start every episode: same pose, zero velocity, zero applied forces
     mujoco.mj_resetDataKeyframe(m, d, m.key("home").id)
     mujoco.mj_forward(m, d)
@@ -131,7 +144,7 @@ def run_episode(p, t_end=T_END, viewer=False):
 
             # Controller sees the current state
             mujoco.mj_step1(m, d)
-            tau, e_p, e_o = osc()
+            tau, e_p, e_o = osc(gains)
             tau_res = np.zeros(7)            # <-- reflex residual goes here
             d.ctrl[:7] = tau + tau_res
             f = push(k, p)
@@ -162,13 +175,12 @@ def git_commit():
     return run("rev-parse", "--short", "HEAD") + ("-dirty" if run("status", "--porcelain") else "")
 
 
-def episode_meta(p, seed):
+def episode_meta(p, seed, gains):
     return {
         "seed": seed,
         "push": asdict(p),
         "dt": DT,
-        "gains": {"kp_pos": KP_POS, "kp_ori": KP_ORI, "kp_null": KP_NULL,
-                  "kd_pos": KD_POS, "kd_ori": KD_ORI, "kd_null": KD_NULL},
+        "gains": gains,
         "tau_max": TAU_MAX.tolist(),
         "model": os.path.relpath(MODEL, HERE),
         "mujoco": mujoco.__version__,
@@ -188,7 +200,7 @@ if __name__ == "__main__":
 
     for p in grid_pushes(SEED, DT):
         log = run_episode(p)
-        save_episode(os.path.join(out, f"push_{p.push_id:02d}.npz"), log, episode_meta(p, SEED))
+        save_episode(os.path.join(out, f"push_{p.push_id:02d}.npz"), log, episode_meta(p, SEED, DEFAULT_GAINS))
 
         peak = 1000 * np.linalg.norm(log["e_p"], axis=1).max()
         sat = (np.abs(log["tau_cmd"]) > TAU_MAX).any(axis=1).sum()

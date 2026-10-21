@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from disturbance import Push
-from osc import run_episode, TAU_MAX, DT
+from osc import run_episode, TAU_MAX, DT, DEFAULT_GAINS, HIGH_KP_GAINS
 
 ONSET = 500   # 1.0 s
 
@@ -46,3 +46,10 @@ def test_episodes_independent():
     p = hand_push(2.0, (0.0, 1.0, 0.0))
     a, b = run_episode(p, t_end=2.5), run_episode(p, t_end=2.5)
     assert all(np.array_equal(a[k], b[k]) for k in a)
+
+
+# Higher KP -> smaller peak error on the same push
+def test_high_kp_stiffer():
+    p = hand_push(4.0, (1.0, 0.0, 0.0))
+    peak = lambda g: np.linalg.norm(run_episode(p, g, t_end=2.5)["e_p"], axis=1).max()
+    assert peak(HIGH_KP_GAINS) < peak(DEFAULT_GAINS)

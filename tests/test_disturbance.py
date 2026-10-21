@@ -4,7 +4,7 @@ import pytest
 # file needs to be named test_*.py for pytest to find it
 
 from disturbance import (Push, profile, push, make_set, IMPULSES, DIRECTIONS_DEG, DURATIONS_S, ONSET_S,
-                         grid_pushes, heldout_pushes, HELDOUT_DIRECTIONS_DEG)
+                         grid_pushes, heldout_pushes, HELDOUT_IMPULSES, HELDOUT_DIRECTIONS_DEG)
 
 DT = 0.002 # 2 ms
 SEED = 0
