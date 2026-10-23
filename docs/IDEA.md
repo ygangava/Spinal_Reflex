@@ -232,19 +232,20 @@ Same held-out cases and metrics as §3e (sustained = 20 / 40 N, 150 / 250 ms, di
 5. ✅ Periodic MLP at home pose (teammate, done early, §3e). Inputs and label still to confirm (§7). Merge `codex/periodic-mlp-reflex` → `mujocoTest`.
 Order rule: build what doesn't depend on motion first; tune or train anything that depends on the input signals only after the arm moves, so nothing is tuned on conditions we'll throw away.
 
-6. **Momentum observer (+ high-pass version)** at the fixed pose. Independent of motion (dynamics model + joint momentum). **Next:** the MLP (§3e) behaves like one but isn't one, so this is the honest reference for "why learn at all".
-7. **Encoder mechanics only:** send-on-delta logic, ON/OFF channels, tests. A pure function of its input, so safe to write now. Do *not* pick thresholds yet — at a fixed pose the error is exactly 0 before the push, so any threshold looks silent. Channels: `tau_prev`, acc/dq, error (§4c). Include the output-hold accumulator and a test for event feedback (risk 17).
-8. **Sensor noise + model-mismatch options in `run_episode`** (velocity/torque noise; wrong payload or link mass in the controller's model). Independent of motion. Needed for risk 18 (acc noise) and risk 3 (where learning can beat the observer). Rerun the MLP and the observer with these on.
-9. **Moving arm (important):** a slow scripted policy (5–10 Hz) reaching toward a target, on top of the 1 kHz OSC — the realistic hierarchy. Covers risk 9 and makes random onsets meaningful (different pose at each push). Rerun the baseline matrix on it.
+6. ✅ **Momentum observer** at the fixed pose (§3f, `docs/OBSERVER.md`). Independent of motion (dynamics model + joint momentum). The MLP (§3e) behaves like one but isn't one, so this is the honest reference for "why learn at all". \\
+6b. **High-pass observer** (later, before step 11): output = −(r − slow low-pass of r), time constant T_hp ≈ 0.3–1 s. Resists fast onsets, lets go of slow / steady forces. Cheap classical version of resist-fast / yield-slow; trade-off = sustained pushes longer than T_hp also get released (risk 2). Run the press sweep.
+1. **Encoder mechanics only:** send-on-delta logic, ON/OFF channels, tests. A pure function of its input, so safe to write now. Do *not* pick thresholds yet — at a fixed pose the error is exactly 0 before the push, so any threshold looks silent. Channels: `tau_prev`, acc/dq, error (§4c). Include the output-hold accumulator and a test for event feedback (risk 17).
+2. **Sensor noise + model-mismatch options in `run_episode`** (velocity/torque noise; wrong payload or link mass in the controller's model). Independent of motion. Needed for risk 18 (acc noise) and risk 3 (where learning can beat the observer). Rerun the MLP and the observer with these on.
+3. **Moving arm (important):** a slow scripted policy (5–10 Hz) reaching toward a target, on top of the 1 kHz OSC — the realistic hierarchy. Covers risk 9 and makes random onsets meaningful (different pose at each push). Rerun the baseline matrix on it.
    - Policy sends waypoints at 5–10 Hz; a 1 kHz interpolator (linear or min-jerk) gives the OSC a smooth `x_d(t)`, `v_d(t)`. Avoid hold-and-jump: each jump is a "fake push" the encoder/reflex would react to.
    - OSC gets feedforward: a = KP·e + KD·(v_d − v) + a_d (today it assumes v_d = 0).
    - Replace global `x_d` with a target function `target(k) -> (x_d, v_d, a_d)` passed to `run_episode`; a held pose is a constant target, so existing tests stay valid.
    - Teacher (−JᵀF) is unaffected by motion — labels stay clean.
    - Task metrics: final position error, time to reach, deviation from the planned path during/after the push.
-10. **Encoder thresholds** tuned on the moving arm (measure events during normal motion with no push), then **toy reflexes:** leaky event-driven PD (no learning) and a tiny periodic MLP trained on the teacher (teammate's home-pose MLP done early, §3e; retrain here). Teammate's training-data generation starts here, on the moving arm.
-11. **Yield spec before SNN training:** pick the resist/yield boundary on the press sweep (§7), and a label or gating that achieves it. Today every learned reflex is rigid to presses (§3e).
-12. **Delta MLP, then SNN** on the shared encoder and the same inputs. Report MACs vs synaptic ops, calm and pushed (`docs/MLP_COST.md`).
-13. Multi-body check (links 4–7), then `run_episode` taking a list of pushes (overlapping / sequential).
+4.  **Encoder thresholds** tuned on the moving arm (measure events during normal motion with no push), then **toy reflexes:** leaky event-driven PD (no learning) and a tiny periodic MLP trained on the teacher (teammate's home-pose MLP done early, §3e; retrain here). Teammate's training-data generation starts here, on the moving arm.
+5.  **Yield spec before SNN training:** pick the resist/yield boundary on the press sweep (§7), and a label or gating that achieves it. Today every learned reflex is rigid to presses (§3e).
+6.  **Delta MLP, then SNN** on the shared encoder and the same inputs. Report MACs vs synaptic ops, calm and pushed (`docs/MLP_COST.md`).
+7.  Multi-body check (links 4–7), then `run_episode` taking a list of pushes (overlapping / sequential).
 
 ---
 
