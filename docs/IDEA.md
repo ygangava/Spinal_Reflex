@@ -1,6 +1,6 @@
 # Framing: an event-driven reflex that cancels pushes
 
-Draft, 2026-10-20; updated 2026-10-21 (sim steps 1–4 done, baseline matrix run, decisions in §9, open options in §10).
+Draft, 2026-10-20; updated 2026-10-21 (sim steps 1–4 done, baseline matrix run, decisions in §9, open options in §10); 2026-10-23 (periodic MLP result, §3e).
 Citations live in `docs/Research_clauded.md` (referred to below as **[EB §n]**).
 All numbers below come from our own sim (`osc.py`, `disturbance.py`). The run conditions are given with each table.
 
@@ -102,6 +102,37 @@ Conditions: DT 1 ms, rate limit on, hand pushes, seed 0, mean over 4 directions 
 - **Sustained:** where a reflex wins — even 25 ms late, 2.5× better than high-KP, 5× better than OSC.
 - **Press:** OSC and high-KP yield like fixed springs at every rise time; the oracle is **rigid at every rise time**. Nothing yet has the target behavior (rigid to fast onsets, OSC-like to slow ones) — that gap is the reflex's job.
 
+### 3e. Periodic MLP (teammate, branch `codex/periodic-mlp-reflex`; details in `docs/MLP.md`, `docs/MLP_COST.md`)
+Conditions: home pose, hand pushes, noise-free, held-out seeds 200/201; 28 → 64 tanh → 7; inputs q − q0, dq, finite-difference acc, previous applied torque (`tau_prev`) − hold torque; label −JᵀF shifted 1 tick; 2 data rounds (DAgger). MLP at +1 tick output delay, oracle at 2 (same force → torque latency).
+
+| | OSC | High-KP | MLP | Oracle 2 ms |
+|---|---|---|---|---|
+| Sustained: peak error | 28.9 mm | 14.1 | 0.75 | 0.69 |
+| Impacts: peak error | 30.9 mm | 22.3 | 17.6 | 17.7 |
+| Press: hold deflection | 43.1 mm | 16.3 | 0.33 | 0.0 |
+
+- **Near-oracle on sustained pushes, but rigid to presses** (label cancels every force).
+- **It is a learned observer-like estimator.** Dynamics give −τ_ext = τ_applied − M·q̈ − bias, so at a fixed pose the label ≈ (`tau_prev` − τ_ref) − M·acc, linear in two of its inputs. That formula alone is within 0.5% of the label on near-cancelled data (8.8% on OSC-only). Closed-loop ablation: zeroing `tau_prev` → 101% error, acc → 5.8%, q / dq → ~1%.
+- While cancelling, acc ≈ 0, so output ≈ `tau_prev` − τ_ref: it **holds its own last output**. This is what fixes risk 1.
+- **Cost:** 2,240 dense MACs every tick, calm or pushed; 2,304 params (9 KiB FP32). Host latency isn't relevant to the FPGA comparison.
+- **So:** the inputs decide the result more than the network does. The SNN can't win on rejection; it has to win on cost (and ideally on yielding to presses).
+
+### 3f. Momentum observer (`observer_reflex.py`, `python -m scripts.observer ablate|sweep|compare` → `results/observer/`)
+Same held-out cases and metrics as §3e (sustained = 20 / 40 N, 150 / 250 ms, diagonals). Observer at +1 tick output delay (2-tick total, same as MLP).
+
+| | OSC | High-KP | MLP | Observer K_O=100 | Observer K_O=1000 | Oracle 2 ms |
+|---|---|---|---|---|---|---|
+| Sustained: peak error | 28.9 mm | 14.1 | 0.755 | 2.11 | 0.687 | 0.687 |
+| Impacts: peak error | 30.9 mm | 22.3 | 17.6 | 17.6 | 17.7 | 17.7 |
+| Press: hold deflection | 43.1 mm | 16.3 | 0.33 | ≈0 | ≈0 | ≈0 |
+| Own ops / tick | – | – | 2,240 MACs | ~112 MACs | ~112 MACs | – |
+
+- **Lag = 1/K_O.** Discrete: K_O·DT = 1 is exact after one tick (= oracle); > 1 overshoots; > 2 diverges. Validation sweep (sustained peak): K_O 25 / 50 / 100 / 200 / 500 / 1000 → 6.49 / 3.76 / 2.24 / 1.53 / 1.12 / 0.98 mm.
+- **Ablation:** dropping joint damping leaves a 0.37 N·m false estimate after release; dropping Ṁq̇ only 0.013.
+- **Latency:** every reflex loses ~0.2 mm per extra ms (sustained, held-out).
+- **Op count excludes M(q) and b, which the OSC already computes every tick.**
+- **So:** with a perfect model and no noise, a training-free observer ties the oracle and beats the MLP with ~20× fewer of its own ops. K_O = 1000 is only realistic noise-free; real observers use ~50–200, where the MLP wins (0.755 vs 2.11 mm). Noise + model mismatch (§8 step 8) decide whether learning earns its place.
+
 ---
 
 ## 4. Approach
@@ -123,17 +154,19 @@ Conditions: DT 1 ms, rate limit on, hand pushes, seed 0, mean over 4 directions 
 |---|---|---|
 | OSC alone | Floor | core |
 | High-KP OSC | Answers "just raise the gains" | core |
-| OSC + momentum observer feedforward | Classical rival | core |
+| OSC + momentum observer feedforward | Classical rival; more important now that the MLP ≈ learned observer (§3e). Not covered by the MLP | core |
 | Same, high-pass filtered | Fair rival for the slow-press test | stretch |
 | Oracle at 0 / 5 / 25 ms delay | Upper bound | core |
-| Periodic MLP | Dense learned baseline | stretch |
+| Periodic MLP | Dense learned baseline. Done at home pose (§3e); retrain on the moving arm | core |
 | Delta MLP | "Spikes aren't necessary" ablation [EB §7, Neil 2017] | core |
 | SNN | The contribution | core |
 
 ### 4c. Reflex design notes (for training)
 - **Label:** −JᵀF, the teacher, not "teacher − base". Expect the student to be bounded by an observer-like teacher [EB §8].
-- **Inputs must include more than joint error.** See risk 1 below: encode changes in `tau_base`, or in the reflex's own output.
-- **Share one send-on-delta encoder** across the delta MLP and the SNN, so the comparison is fair.
+- **Inputs must include more than joint error.** See risk 1 below: encode changes in `tau_base`, or in the reflex's own output. The MLP uses `tau_prev` (previous applied torque, now in `obs`) + acc + q − q0 + dq (§3e). **The SNN and delta MLP need the same inputs**, or they lose for reasons unrelated to spiking.
+- **Share one send-on-delta encoder** across the delta MLP and the SNN, so the comparison is fair. Its channels now include `tau_prev` and acc/dq, not just error. The encoder mechanics are unchanged.
+- **SNN must hold its output during a steady push.** Nothing changes, so there are no events; if the output leaks, the push returns. Option: output spikes encode torque *changes*, and a per-joint accumulator holds the value.
+- **RTL impact:** same core (LIF, time-multiplexed layer, event queue). Adds motor torque as an FPGA input, a per-joint output hold register, and torque (±87 N·m) / acc ranges for the Q formats. Freeze inputs before the golden model.
 - **Interface (`reflex.py`, done):** `step(obs, gain) -> (torque, estimate)`. `obs` = only what a robot can sense (k, q, dq, e_p, e_o, tau_base). The estimate is a slow summary (external joint torque) for a higher layer. `gain` in [0, 1] scales the torque only; 0 = disabled, estimate still reported. Only `privileged = True` reflexes (the oracle) get the teacher, double-guarded.
 - **Raw vs delay-shifted label:** raw = "cancel the push happening now" (impossible at onset — no evidence yet); shifted by L ticks = "cancel what you could have detected by now" (achievable; the first L ticks go uncancelled, i.e. the delayed oracle at L). Option: train raw, score against the delayed oracle.
 
@@ -158,7 +191,7 @@ Conditions: DT 1 ms, rate limit on, hand pushes, seed 0, mean over 4 directions 
 
 ## 6. Things to consider (risks)
 
-1. **The reflex cancels its own input.** Good cancellation drives the error toward 0, so events stop, the membranes leak, the output decays and the push comes back. With error-only inputs, expect release mid-push or oscillation. **Biggest design risk.** Give the reflex torque-side inputs (changes in `tau_base` or in its own output), as the observer does.
+1. **The reflex cancels its own input.** Good cancellation drives the error toward 0, so events stop, the membranes leak, the output decays and the push comes back. With error-only inputs, expect release mid-push or oscillation. **Biggest design risk.** Give the reflex torque-side inputs (changes in `tau_base` or in its own output), as the observer does. Solved in the MLP by `tau_prev` (§3e).
 2. **Sustained push vs. slow press is about onset rate, not duration.** A pure high-pass reflex also releases a 300 ms sustained push after its time constant. Desired behavior: triggered by a fast onset, held while the force persists. Define the boundary as ramp rate and test it with the slow-press sweep.
 3. **The observer is cheap and already on the robot.** It's a few matrix operations per tick and needs no training, so the SNN likely loses to it on compute as well as rejection. Where a learned reflex can honestly win is **model mismatch**: an unknown payload or wrong link masses, which break a model-based observer. Our sim's model is perfect, so add a mismatch test.
 4. **Label timing.** At push onset the label is nonzero but there's no evidence yet. Shift the labels by the expected detection latency, or score against the delayed oracle.
@@ -174,14 +207,16 @@ Conditions: DT 1 ms, rate limit on, hand pushes, seed 0, mean over 4 directions 
 14. **Hand-only so far.** All results push the hand. Other links should show the same pattern but different magnitudes; the hand-error metric can miss joint motion from link pushes (needs a joint-space term).
 15. **`k` is in `obs`.** A learned reflex could use the tick count as a timing cue. Random onsets make that useless; removing `k` closes it completely.
 16. **Measurement windows.** Results depend on windows long enough to settle (press hold was 0.5 s and gave a false rise-time trend — fixed at 2 s). Check settling for any new metric.
+17. **Event feedback.** `tau_prev` contains the reflex's own output, so an output change triggers an input event, then a recompute, then maybe another output change. This can chatter. Test it once the encoder exists.
+18. **The MLP learned M at one pose.** `q − q0` is relative to the episode start. Expect it to degrade on a moving arm. Finite-difference acc multiplies velocity noise by 1/DT (sim is noise-free).
 
 ---
 
 ## 7. Decisions needed (with teammate)
 
 - [ ] Adopt this framing (push cancellation + slow-press yielding, computation as the contribution)
-- [ ] Reflex inputs: error only, or error + torque-side signals
-- [ ] Label: raw −JᵀF, or delay-shifted
+- [ ] Reflex inputs: error only, or error + torque-side signals — MLP used torque-side (`tau_prev` + acc); confirm
+- [ ] Label: raw −JᵀF, or delay-shifted — MLP used a 1-tick shift; confirm
 - [ ] Core controller list (§4b)
 - [ ] Held-out protocol
 - [x] DT = 1 ms switch (done on the sim side; tell teammate — all training data should be generated at 1 ms)
@@ -194,18 +229,22 @@ Conditions: DT 1 ms, rate limit on, hand pushes, seed 0, mean over 4 directions 
 2. ✅ Teacher torque in the log, plus oracle-with-delay as a condition (`scripts/oracle_delay.py` reproduces §3b)
 3. ✅ New disturbance types (sustained, slow-press sweep)
 4. ✅ Baseline matrix without learning (§3d, `renders/baseline.png`)
+5. ✅ Periodic MLP at home pose (teammate, done early, §3e). Inputs and label still to confirm (§7). Merge `codex/periodic-mlp-reflex` → `mujocoTest`.
 Order rule: build what doesn't depend on motion first; tune or train anything that depends on the input signals only after the arm moves, so nothing is tuned on conditions we'll throw away.
 
-5. **Momentum observer (+ high-pass version)** at the fixed pose. Independent of motion (dynamics model + joint momentum); first real, non-cheating reflex in the slot.
-6. **Encoder mechanics only:** send-on-delta logic, ON/OFF channels, tests. A pure function of its input, so safe to write now. Do *not* pick thresholds yet — at a fixed pose the error is exactly 0 before the push, so any threshold looks silent.
-7. **Moving arm (important):** a slow scripted policy (5–10 Hz) reaching toward a target, on top of the 1 kHz OSC — the realistic hierarchy. Covers risk 9 and makes random onsets meaningful (different pose at each push). Rerun the baseline matrix on it.
+6. **Momentum observer (+ high-pass version)** at the fixed pose. Independent of motion (dynamics model + joint momentum). **Next:** the MLP (§3e) behaves like one but isn't one, so this is the honest reference for "why learn at all".
+7. **Encoder mechanics only:** send-on-delta logic, ON/OFF channels, tests. A pure function of its input, so safe to write now. Do *not* pick thresholds yet — at a fixed pose the error is exactly 0 before the push, so any threshold looks silent. Channels: `tau_prev`, acc/dq, error (§4c). Include the output-hold accumulator and a test for event feedback (risk 17).
+8. **Sensor noise + model-mismatch options in `run_episode`** (velocity/torque noise; wrong payload or link mass in the controller's model). Independent of motion. Needed for risk 18 (acc noise) and risk 3 (where learning can beat the observer). Rerun the MLP and the observer with these on.
+9. **Moving arm (important):** a slow scripted policy (5–10 Hz) reaching toward a target, on top of the 1 kHz OSC — the realistic hierarchy. Covers risk 9 and makes random onsets meaningful (different pose at each push). Rerun the baseline matrix on it.
    - Policy sends waypoints at 5–10 Hz; a 1 kHz interpolator (linear or min-jerk) gives the OSC a smooth `x_d(t)`, `v_d(t)`. Avoid hold-and-jump: each jump is a "fake push" the encoder/reflex would react to.
    - OSC gets feedforward: a = KP·e + KD·(v_d − v) + a_d (today it assumes v_d = 0).
    - Replace global `x_d` with a target function `target(k) -> (x_d, v_d, a_d)` passed to `run_episode`; a held pose is a constant target, so existing tests stay valid.
    - Teacher (−JᵀF) is unaffected by motion — labels stay clean.
    - Task metrics: final position error, time to reach, deviation from the planned path during/after the push.
-8. **Encoder thresholds** tuned on the moving arm (measure events during normal motion with no push), then **toy reflexes:** leaky event-driven PD (no learning) and a tiny periodic MLP trained on the teacher. Teammate's training-data generation starts here, on the moving arm.
-9. Multi-body check (links 4–7), then `run_episode` taking a list of pushes (overlapping / sequential).
+10. **Encoder thresholds** tuned on the moving arm (measure events during normal motion with no push), then **toy reflexes:** leaky event-driven PD (no learning) and a tiny periodic MLP trained on the teacher (teammate's home-pose MLP done early, §3e; retrain here). Teammate's training-data generation starts here, on the moving arm.
+11. **Yield spec before SNN training:** pick the resist/yield boundary on the press sweep (§7), and a label or gating that achieves it. Today every learned reflex is rigid to presses (§3e).
+12. **Delta MLP, then SNN** on the shared encoder and the same inputs. Report MACs vs synaptic ops, calm and pushed (`docs/MLP_COST.md`).
+13. Multi-body check (links 4–7), then `run_episode` taking a list of pushes (overlapping / sequential).
 
 ---
 
@@ -227,8 +266,8 @@ Order rule: build what doesn't depend on motion first; tune or train anything th
 | Area | Options | Leaning |
 |---|---|---|
 | Framing | Pure cancellation · cancellation + slow-press yield (hybrid) · soft-arm compliance only | Hybrid (pending teammate) |
-| Reflex inputs | Joint error only · + `tau_base` changes · + own output | More than error (risk 1) |
-| Label | Raw −JᵀF · delay-shifted · train raw, score vs delayed oracle | Decide with teammate after measuring detection latency |
+| Reflex inputs | Joint error only · + `tau_base` changes · + own output | More than error (risk 1); MLP: `tau_prev` + acc + q − q0 + dq |
+| Label | Raw −JᵀF · delay-shifted · train raw, score vs delayed oracle | 1-tick shift (MLP); score vs oracle at the same total latency |
 | Error space for encoder | End-effector (6 or 12 ch) · joint (14 ch: 7 position + 7 velocity errors) | Open |
 | Classical rival | Momentum observer · + high-pass version · model-mismatch test | Observer core; mismatch test is where learning can win |
 | Pushes | Hand only · links 4–7 · multiple bodies · overlapping / sequential pushes | Hand until the reflex works, then generalize |

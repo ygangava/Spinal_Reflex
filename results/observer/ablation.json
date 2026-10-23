@@ -1,0 +1,26 @@
+{
+  "push": "sustained_pushes(0)[13]",
+  "k_o": 100,
+  "rows": [
+    {
+      "variant": "full observer",
+      "false_estimate_after_release_nm": 0.001390320246440202,
+      "peak_mm_gain1": 1.4929928250128985
+    },
+    {
+      "variant": "no damping",
+      "false_estimate_after_release_nm": 0.36845121810219483,
+      "peak_mm_gain1": 1.6357410142076034
+    },
+    {
+      "variant": "no Mdot*dq",
+      "false_estimate_after_release_nm": 0.012553290449465737,
+      "peak_mm_gain1": 1.4939054312962496
+    },
+    {
+      "variant": "neither",
+      "false_estimate_after_release_nm": 0.36227767174576153,
+      "peak_mm_gain1": 1.6368271776608312
+    }
+  ]
+}

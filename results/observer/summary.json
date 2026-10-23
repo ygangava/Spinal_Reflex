@@ -1,0 +1,224 @@
+{
+  "evaluation_seeds": [
+    200,
+    201
+  ],
+  "output_delay_ticks": 1,
+  "oracle_delay_ticks": 2,
+  "observer_op_counts_per_tick": {
+    "macs": 112,
+    "add_sub": 98,
+    "div": 49,
+    "neg": 7,
+    "note": "excludes M(q), qfrc_bias, qfrc_passive evaluation (shared with the OSC)"
+  },
+  "mlp_dense_macs_per_tick": 2240,
+  "means": {
+    "impact": {
+      "OSC": {
+        "peak_mm": 30.850652495052454,
+        "auc_mm_s": 7.290428921457175,
+        "saturation_fraction": 0.0007375794451044001,
+        "torque_limited_fraction": 0.007533703563149814,
+        "final_mm": 0.04476007188126889,
+        "n": 32
+      },
+      "High-KP OSC": {
+        "peak_mm": 22.306280119389633,
+        "auc_mm_s": 2.968104639416259,
+        "saturation_fraction": 0.00408584094099868,
+        "torque_limited_fraction": 0.025686030063569457,
+        "final_mm": 0.0007331776360555945,
+        "n": 32
+      },
+      "MLP": {
+        "peak_mm": 17.568707468280614,
+        "auc_mm_s": 3.898374502360409,
+        "saturation_fraction": 0.006262865261380021,
+        "torque_limited_fraction": 0.02478508783235868,
+        "final_mm": 0.06825412485677884,
+        "n": 32
+      },
+      "Observer K=100": {
+        "peak_mm": 17.6270057884257,
+        "auc_mm_s": 3.9149321743925327,
+        "saturation_fraction": 0.007973440183271114,
+        "torque_limited_fraction": 0.02908906291482697,
+        "final_mm": 0.015229542001401648,
+        "n": 32
+      },
+      "Observer K=1000": {
+        "peak_mm": 17.70823471862136,
+        "auc_mm_s": 3.954181632231239,
+        "saturation_fraction": 0.006183449088274498,
+        "torque_limited_fraction": 0.022887732062044832,
+        "final_mm": 0.01972630380200091,
+        "n": 32
+      },
+      "Oracle": {
+        "peak_mm": 17.71955382612994,
+        "auc_mm_s": 3.9575270746067273,
+        "saturation_fraction": 0.006154148401762038,
+        "torque_limited_fraction": 0.022887732062044832,
+        "final_mm": 0.019677344445719152,
+        "n": 32
+      }
+    },
+    "sustained": {
+      "OSC": {
+        "peak_mm": 28.901823477120317,
+        "auc_mm_s": 8.461866427293256,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.03665995715169512,
+        "n": 32
+      },
+      "High-KP OSC": {
+        "peak_mm": 14.079425940418364,
+        "auc_mm_s": 3.1770036261216665,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.0004479085661847342,
+        "n": 32
+      },
+      "MLP": {
+        "peak_mm": 0.7547663736323074,
+        "auc_mm_s": 0.22067877183935183,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.007200704560360739,
+        "final_mm": 0.00368054801434868,
+        "n": 32
+      },
+      "Observer K=100": {
+        "peak_mm": 2.1106224912676557,
+        "auc_mm_s": 0.6432299498888445,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.00403960338629168,
+        "final_mm": 0.00270452729048244,
+        "n": 32
+      },
+      "Observer K=1000": {
+        "peak_mm": 0.6873762088347027,
+        "auc_mm_s": 0.2080084139726739,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.007216358348937432,
+        "final_mm": 0.00044990270624979136,
+        "n": 32
+      },
+      "Oracle": {
+        "peak_mm": 0.6874057469122894,
+        "auc_mm_s": 0.2080368867820605,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.007216358348937432,
+        "final_mm": 0.00044756931129205874,
+        "n": 32
+      }
+    },
+    "press": {
+      "OSC": {
+        "peak_mm": 43.149414813183135,
+        "auc_mm_s": 110.238080333101,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.02972000240166775,
+        "hold_mm": 43.14878799834482,
+        "n": 56
+      },
+      "High-KP OSC": {
+        "peak_mm": 16.253249543739148,
+        "auc_mm_s": 41.492059062863646,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.00028511129923350836,
+        "hold_mm": 16.253242961723068,
+        "n": 56
+      },
+      "MLP": {
+        "peak_mm": 0.4248265833708852,
+        "auc_mm_s": 0.9465179768138394,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.006593720356746924,
+        "hold_mm": 0.33274803399136665,
+        "n": 56
+      },
+      "Observer K=100": {
+        "peak_mm": 1.3037294411000617,
+        "auc_mm_s": 0.9540008977226987,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.0021310664189516187,
+        "hold_mm": 3.531255192050124e-05,
+        "n": 56
+      },
+      "Observer K=1000": {
+        "peak_mm": 0.2384227571150505,
+        "auc_mm_s": 0.1734582238692697,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.0003662198064648199,
+        "hold_mm": 6.085631625247807e-06,
+        "n": 56
+      },
+      "Oracle": {
+        "peak_mm": 0.23838021795400782,
+        "auc_mm_s": 0.1734587020653886,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 0.0003636667531417296,
+        "hold_mm": 5.99954556862432e-06,
+        "n": 56
+      }
+    },
+    "quiet": {
+      "OSC": {
+        "peak_mm": 5.61803689652078e-17,
+        "auc_mm_s": 5.020494470893626e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 5.61803689652078e-17,
+        "n": 2
+      },
+      "High-KP OSC": {
+        "peak_mm": 4.568644806472689e-17,
+        "auc_mm_s": 4.3554140387592157e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 4.568644806472689e-17,
+        "n": 2
+      },
+      "MLP": {
+        "peak_mm": 3.289957865428674e-05,
+        "auc_mm_s": 3.1102692916106866e-05,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 3.289957865428674e-05,
+        "n": 2
+      },
+      "Observer K=100": {
+        "peak_mm": 4.011329017628874e-17,
+        "auc_mm_s": 3.5843270771266765e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 4.011329017628874e-17,
+        "n": 2
+      },
+      "Observer K=1000": {
+        "peak_mm": 4.0048297570281384e-17,
+        "auc_mm_s": 3.572998861884605e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 4.0048297570281384e-17,
+        "n": 2
+      },
+      "Oracle": {
+        "peak_mm": 5.61803689652078e-17,
+        "auc_mm_s": 5.020494470893626e-17,
+        "saturation_fraction": 0.0,
+        "torque_limited_fraction": 0.0,
+        "final_mm": 5.61803689652078e-17,
+        "n": 2
+      }
+    }
+  }
+}

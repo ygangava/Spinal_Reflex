@@ -30,3 +30,5 @@ termcolor==3.3.0
 tqdm==4.70.1
 typing_extensions==4.16.0
 zipp==4.1.1
+torch==2.14.1
+matplotlib==3.11.2
