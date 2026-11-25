@@ -146,7 +146,7 @@ Same held-out cases and metrics as §3e (sustained = 20 / 40 N, 150 / 250 ms, di
    - sustained pushes, 100–300 ms (`"trap"` shape, 10 ms rise, scaled by peak force)
    - short impacts, kept as the limit case (half-sine, scaled by impulse)
    - slow-press ramps, rise swept 20 ms → 2 s, 2 s hold — same trapezoid as sustained, only the rise differs
-6. ✅ **Gains as parameters** (`make_gains`, KD = 2√KP always). Kept the Λ-scaled OSC form; stiffness reported as KP·m_eff in N/m. `HIGH_KP_GAINS` = pos 400 / ori 300 / null 20 (≈ 2900 N/m in x, top of Franka's range).
+6. ✅ **Gains as parameters** (`make_gains`, KD = 2√KP always).**** Kept the Λ-scaled OSC form; stiffness reported as KP·m_eff in N/m. `HIGH_KP_GAINS` = pos 400 / ori 300 / null 20 (≈ 2900 N/m in x, top of Franka's range).
 
 ### 4b. Controllers
 
@@ -169,6 +169,38 @@ Same held-out cases and metrics as §3e (sustained = 20 / 40 N, 150 / 250 ms, di
 - **RTL impact:** same core (LIF, time-multiplexed layer, event queue). Adds motor torque as an FPGA input, a per-joint output hold register, and torque (±87 N·m) / acc ranges for the Q formats. Freeze inputs before the golden model.
 - **Interface (`reflex.py`, done):** `step(obs, gain) -> (torque, estimate)`. `obs` = only what a robot can sense (k, q, dq, e_p, e_o, tau_base). The estimate is a slow summary (external joint torque) for a higher layer. `gain` in [0, 1] scales the torque only; 0 = disabled, estimate still reported. Only `privileged = True` reflexes (the oracle) get the teacher, double-guarded.
 - **Raw vs delay-shifted label:** raw = "cancel the push happening now" (impossible at onset — no evidence yet); shifted by L ticks = "cancel what you could have detected by now" (achievable; the first L ticks go uncancelled, i.e. the delayed oracle at L). Option: train raw, score against the delayed oracle.
+
+### 4d. Event encoder (`encoder.py`, `tests/test_encoder.py`, 2026-11-24)
+
+**Where it sits.** Inside a reflex, in the same `compute(obs)` slot as the MLP. `osc.py` doesn't change.
+```
+obs → features (28/tick, CausalFeatures) → SendOnDelta → ON/OFF counts → network → output events → OutputHold → torque → + OSC
+```
+The periodic MLP has no event encoder: its `self.encoder` is `CausalFeatures` (features every tick, network every tick). Name it `features` in new reflexes to avoid the clash.
+
+**Signals (decided): the same 28 as the periodic MLP**, so the delta MLP / SNN comparison is fair (§4c).
+
+| Channels | At a held pose this is | Why it's needed |
+|---|---|---|
+| `q − q0` (7) | joint position error | where the arm was pushed to |
+| `dq` (7) | joint velocity error (target v = 0) | how fast it's moving |
+| finite-difference acc (7) | — | sees a push start before much error builds up |
+| `tau_prev` − hold torque (7) | — | a cancelled push has ≈ 0 error; only the torque still shows it (risk 1) |
+
+This settles "error space" (§10) as joint space, which also covers link pushes better than hand error (risk 14). Catch: `q − q0` is the error only while holding still; on a moving arm it must become `q − q_d` (risk 18).
+
+**`SendOnDelta(theta)`** — per channel, keep `ref` (last value sent). Each tick, `n = trunc((x − ref) / θ)` whole thresholds crossed → `on = max(n, 0)`, `off = max(−n, 0)`, `ref += n·θ`.
+- Counts, not 1-per-tick: a 3.5θ jump gives 3 events, so fast pushes don't lose information; 0.5θ stays in `ref`.
+- First sample sets `ref`, emits nothing. Steady input → silent (that's the compute saving).
+- `|x − ref| < θ` always, so the events alone rebuild the input to within θ (tested).
+
+**`OutputHold(delta)`** — per-joint torque += (on − off)·δ, held between events. A steady push sends no events, so a leaky output would let the push back in (§4c); this holds. Encoder → hold with δ = θ is an exact inverse (tested).
+
+**Risk 17 (event echo).** `tau_prev` contains the reflex's own output, so an output change shows up as input events next tick. Tested: with nothing reacting, it's one burst then silence. The real chatter test (network reacting to its own echo) needs the SNN.
+
+**Thresholds.** `θ = k × x_scale` (each feature's RMS, already stored in the MLP model), sweep `k`. Tuned at home pose because the moving arm is cut for time (state as a limitation).
+
+**Next.** `DeltaMLPReflex`: features → `SendOnDelta` → if any channel fired, run the trained MLP on `enc.ref`, else hold last torque. No training needed. Sweep `k`: peak / AUC vs periodic MLP and observer, plus fraction of ticks that compute (calm vs pushed). Then rerun with sensor noise (step 9) — noise makes the encoder fire, the honest test of event savings. The SNN drops into the same slot.
 
 ---
 
@@ -232,20 +264,26 @@ Same held-out cases and metrics as §3e (sustained = 20 / 40 N, 150 / 250 ms, di
 5. ✅ Periodic MLP at home pose (teammate, done early, §3e). Inputs and label still to confirm (§7). Merge `codex/periodic-mlp-reflex` → `mujocoTest`.
 Order rule: build what doesn't depend on motion first; tune or train anything that depends on the input signals only after the arm moves, so nothing is tuned on conditions we'll throw away.
 
-6. ✅ **Momentum observer** at the fixed pose (§3f, `docs/OBSERVER.md`). Independent of motion (dynamics model + joint momentum). The MLP (§3e) behaves like one but isn't one, so this is the honest reference for "why learn at all". \\
-6b. **High-pass observer** (later, before step 11): output = −(r − slow low-pass of r), time constant T_hp ≈ 0.3–1 s. Resists fast onsets, lets go of slow / steady forces. Cheap classical version of resist-fast / yield-slow; trade-off = sustained pushes longer than T_hp also get released (risk 2). Run the press sweep.
-1. **Encoder mechanics only:** send-on-delta logic, ON/OFF channels, tests. A pure function of its input, so safe to write now. Do *not* pick thresholds yet — at a fixed pose the error is exactly 0 before the push, so any threshold looks silent. Channels: `tau_prev`, acc/dq, error (§4c). Include the output-hold accumulator and a test for event feedback (risk 17).
-2. **Sensor noise + model-mismatch options in `run_episode`** (velocity/torque noise; wrong payload or link mass in the controller's model). Independent of motion. Needed for risk 18 (acc noise) and risk 3 (where learning can beat the observer). Rerun the MLP and the observer with these on.
-3. **Moving arm (important):** a slow scripted policy (5–10 Hz) reaching toward a target, on top of the 1 kHz OSC — the realistic hierarchy. Covers risk 9 and makes random onsets meaningful (different pose at each push). Rerun the baseline matrix on it.
+6. ✅ **Momentum observer** at the fixed pose (§3f, `docs/OBSERVER.md`). Independent of motion (dynamics model + joint momentum). The MLP (§3e) behaves like one but isn't one, so this is the honest reference for "why learn at all". \
+7. **High-pass observer** (step 6 cont. later, before step 12): output = −(r − slow low-pass of r), time constant T_hp ≈ 0.3–1 s. Resists fast onsets, lets go of slow / steady forces. Cheap classical version of resist-fast / yield-slow; trade-off = sustained pushes longer than T_hp also get released (risk 2). Run the press sweep.
+8. **Encoder mechanics only:** send-on-delta logic, ON/OFF channels, tests. A pure function of its input, so safe to write now. Do *not* pick thresholds yet — at a fixed pose the error is exactly 0 before the push, so any threshold looks silent. Channels: `tau_prev`, acc/dq, error (§4c). Include the output-hold accumulator and a test for event feedback (risk 17).
+9. **Sensor noise + model-mismatch options in `run_episode`** (velocity/torque noise; wrong payload or link mass in the controller's model). Independent of motion. Needed for risk 18 (acc noise) and risk 3 (where learning can beat the observer). Rerun the MLP and the observer with these on.
+10. **Multi-push plumbing (moved up from the old last step, 2026-11-24):** `run_episode` takes a list of pushes on any body (overlapping / sequential). Independent of motion, so it goes before training per the order rule.
+   - A single `Push` is wrapped into a list, so existing tests and scripts stay valid. First test: a one-push list is bit-identical to today.
+   - Forces on the same tick (and same body) **add**, not overwrite.
+   - Teacher = Σ −J_bᵀF_b over active pushes, each at its own body's COM.
+   - Log per-push force and body; add the joint-space metric (risk 14).
+   - **Restrict in the generators, not the sim:** training starts with single hand pushes; widening to links 4–7 and multi-push sets is a `disturbance.py` change, not a sim change.
+11. **Moving arm (important):** a slow scripted policy (5–10 Hz) reaching toward a target, on top of the 1 kHz OSC — the realistic hierarchy. Covers risk 9 and makes random onsets meaningful (different pose at each push). Rerun the baseline matrix on it.
    - Policy sends waypoints at 5–10 Hz; a 1 kHz interpolator (linear or min-jerk) gives the OSC a smooth `x_d(t)`, `v_d(t)`. Avoid hold-and-jump: each jump is a "fake push" the encoder/reflex would react to.
    - OSC gets feedforward: a = KP·e + KD·(v_d − v) + a_d (today it assumes v_d = 0).
    - Replace global `x_d` with a target function `target(k) -> (x_d, v_d, a_d)` passed to `run_episode`; a held pose is a constant target, so existing tests stay valid.
    - Teacher (−JᵀF) is unaffected by motion — labels stay clean.
    - Task metrics: final position error, time to reach, deviation from the planned path during/after the push.
-4.  **Encoder thresholds** tuned on the moving arm (measure events during normal motion with no push), then **toy reflexes:** leaky event-driven PD (no learning) and a tiny periodic MLP trained on the teacher (teammate's home-pose MLP done early, §3e; retrain here). Teammate's training-data generation starts here, on the moving arm.
-5.  **Yield spec before SNN training:** pick the resist/yield boundary on the press sweep (§7), and a label or gating that achieves it. Today every learned reflex is rigid to presses (§3e).
-6.  **Delta MLP, then SNN** on the shared encoder and the same inputs. Report MACs vs synaptic ops, calm and pushed (`docs/MLP_COST.md`).
-7.  Multi-body check (links 4–7), then `run_episode` taking a list of pushes (overlapping / sequential).
+12.  **Encoder thresholds** tuned on the moving arm (measure events during normal motion with no push), then **toy reflexes:** leaky event-driven PD (no learning) and a tiny periodic MLP trained on the teacher (teammate's home-pose MLP done early, §3e; retrain here). Teammate's training-data generation starts here, on the moving arm.
+13.  **Yield spec before SNN training:** pick the resist/yield boundary on the press sweep (§7), and a label or gating that achieves it. Today every learned reflex is rigid to presses (§3e).
+14.  **Delta MLP, then SNN** on the shared encoder and the same inputs. Report MACs vs synaptic ops, calm and pushed (`docs/MLP_COST.md`).
+15.  **Widen the push sets** (links 4–7, multi-push episodes) in the generators; retrain and evaluate on them. Plumbing already exists (step 10).
 
 ---
 
@@ -267,9 +305,9 @@ Order rule: build what doesn't depend on motion first; tune or train anything th
 | Area | Options | Leaning |
 |---|---|---|
 | Framing | Pure cancellation · cancellation + slow-press yield (hybrid) · soft-arm compliance only | Hybrid (pending teammate) |
-| Reflex inputs | Joint error only · + `tau_base` changes · + own output | More than error (risk 1); MLP: `tau_prev` + acc + q − q0 + dq |
+| Reflex inputs | Joint error only · + `tau_base` changes · + own output | **Decided (2026-11-24):** same 28 as the MLP — q − q0, dq, acc, `tau_prev` − hold (§4d) |
 | Label | Raw −JᵀF · delay-shifted · train raw, score vs delayed oracle | 1-tick shift (MLP); score vs oracle at the same total latency |
-| Error space for encoder | End-effector (6 or 12 ch) · joint (14 ch: 7 position + 7 velocity errors) | Open |
+| Error space for encoder | End-effector (6 or 12 ch: hand position + orientation, ± their velocities) · joint (14 ch: 7 position + 7 velocity errors) | **Decided (2026-11-24): joint**, + acc and `tau_prev` (§4d). Covers link pushes; needs q − q_d on a moving arm |
 | Classical rival | Momentum observer · + high-pass version · model-mismatch test | Observer core; mismatch test is where learning can win |
 | Pushes | Hand only · links 4–7 · multiple bodies · overlapping / sequential pushes | Hand until the reflex works, then generalize |
 | Strength across bodies | Same force · scale per body · define by resulting peak displacement | Open |
@@ -279,3 +317,16 @@ Order rule: build what doesn't depend on motion first; tune or train anything th
 | Moving-arm task metrics | Final error · time to reach · path deviation during/after push | Path deviation primary for push effects |
 | Gain schedule | Constant per episode · function of time / estimate | Constant for now |
 | Metrics | Peak · AUC · time to 1 mm · joint-space term | Peak + AUC primary; add joint term for link pushes |
+
+
+
+## Midterm feedback
+**What they said:**
+
+This work proposes an event-driven SNN-based reflex for robotic push cancellation, aiming to achieve fast disturbance rejection with low computational cost.
+
+The motivation is interesting and well aligned with neuromorphic computing. I particularly appreciate the comparison with a conventional momentum observer and a periodic MLP. The consideration of realistic torque limits, computation latency, and different disturbance conditions also makes the experimental design convincing.
+
+However, the main contribution has not yet been demonstrated because the SNN and delta MLP are still under development. More importantly, the preliminary results show that the momentum observer already achieves oracle-level performance with significantly fewer operations than the MLP. Therefore, it is unclear what advantages the proposed SNN can provide over this conventional approach. The authors should demonstrate whether the SNN offers better computational efficiency or robustness under sensor noise and model mismatch. Additionally, the authors should provide FPGA implementation results, including resource utilization, latency, and power consumption, to support their claim of hardware efficiency. A comparison between the SNN and delta MLP using the same event encoder would also help clarify whether the benefits come from event-driven processing or spiking computation itself.
+
+Overall, this is an interesting and well-motivated project with strong relevance to neuromorphic computing. However, further experiments are necessary to demonstrate the actual advantages of the proposed SNN over conventional approaches.

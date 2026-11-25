@@ -4,6 +4,22 @@ import numpy as np
 from osc import MODEL, DT
 from reflex import Reflex
 
+'''
+The momentum observer works like this.
+The robot knows its own physics: how heavy each link is (M),
+what gravity and motion pull on it (b), and what torque its motors applied (τ).
+From those, it can predict how much momentum the arm should have if nobody touched it.
+It also measures how much momentum the arm actually has, from its joint speeds.
+If someone pushes the arm, those two numbers drift apart,
+and the size of the gap tells you how hard the push was.
+Instead of reacting to the raw gap all at once,
+the observer keeps a running guess r of the push
+and updates it a little each tick toward whatever the gap says,
+so the guess rises smoothly to the true push force over about 1/K_O seconds.
+The reflex then applies −r to cancel the push. It never has to compute acceleration,
+which is noisy, and it needs no training, because it's just physics bookkeeping.
+'''
+
 
 class MomentumObserver(Reflex):
     name = "momentum_observer"
@@ -73,20 +89,3 @@ class MomentumObserver(Reflex):
         b = self.d.qfrc_bias[:7].copy()       # gravity + Coriolis/centrifugal
         passive = self.d.qfrc_passive[:7].copy()  # joint damping (-1.0 * dq here); a known force, not a push
         return M, b, passive
-
-
-'''
-The momentum observer works like this.
-The robot knows its own physics: how heavy each link is (M),
-what gravity and motion pull on it (b), and what torque its motors applied (τ).
-From those, it can predict how much momentum the arm should have if nobody touched it.
-It also measures how much momentum the arm actually has, from its joint speeds.
-If someone pushes the arm, those two numbers drift apart,
-and the size of the gap tells you how hard the push was.
-Instead of reacting to the raw gap all at once,
-the observer keeps a running guess r of the push
-and updates it a little each tick toward whatever the gap says,
-so the guess rises smoothly to the true push force over about 1/K_O seconds.
-The reflex then applies −r to cancel the push. It never has to compute acceleration,
-which is noisy, and it needs no training, because it's just physics bookkeeping.
-'''

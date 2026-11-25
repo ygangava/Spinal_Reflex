@@ -108,6 +108,7 @@ class MLPReflex(Reflex):
         if dt is not None and not np.isclose(model_dt, dt):
             raise ValueError("Model timestep does not match the simulator")
         self.encoder = CausalFeatures(model.metadata["features"], model_dt)
+        #encoder here is features
 
     def reset(self):
         self.encoder.reset()
