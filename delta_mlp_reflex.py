@@ -4,17 +4,29 @@ from reflex import Reflex
 from mlp_reflex import CausalFeatures, MLPModel
 from encoder import SendOnDelta
 
+def feature_noise(q_std, dq_std, dt, tau_std=0.0):
+    # Sensor noise std -> std of each of the 28 features (q - q0, dq, acc, tau_prev - hold).
+    # acc = (dq[k] - dq[k-1]) / dt: difference of two independent noises, divided by dt
+    return np.r_[np.full(7, q_std), np.full(7, dq_std),
+                 np.full(7, np.sqrt(2) * dq_std / dt), np.full(7, tau_std)]
+
+
 class DeltaMLPReflex(Reflex):
     name = "delta_mlp"
-    
-    def __init__(self, model, k):
-        # store model, build features + encoder (theta = k * x_scale), then reset
+
+    def __init__(self, model, k, floor=None):
+        # store model, build features + encoder, then reset
+        # theta = k * x_scale, raised to `floor` where noise is bigger (floor = c * feature_noise(...)).
+        # The robot can measure its sensor noise at rest, so the floor isn't privileged.
+        # Below theta, noise never moves the encoder's ref: the threshold is also a noise filter.
         self.model = model
-        self.k = k
+        theta = k * model.x_scale if floor is None else np.maximum(k * model.x_scale, floor)
+        # One event = this much change in scaled units, per channel (= k everywhere without a floor)
+        self.event_size = theta / model.x_scale
         model_dt = float(model.metadata["dt"])
 
         self.features = CausalFeatures(model.metadata["features"], model_dt)
-        self.enc = SendOnDelta(k * model.x_scale)
+        self.enc = SendOnDelta(theta)
         
         # self.torque, ticks, compute_ticks are created inside reset, so need to call to make them exist now
         self.reset()
@@ -52,10 +64,10 @@ class DeltaMLPReflex(Reflex):
         
         if fired.size:
             # Linear layer -- only the changed rows contirbute
-            # One event = ±k in scaled units
-            
-            # pre += k × (on − off)[fired] @ W1[fired]
-            self.pre += self.k * (n[fired] @ m.w1[fired])
+            # One event = ±event_size in scaled units
+
+            # pre += (on − off)[fired] × event_size[fired] @ W1[fired]
+            self.pre += (n[fired] * self.event_size[fired]) @ m.w1[fired]
             
             # tanh is nonlinear, so the rest is recomputed (same math as mlpmodel.predict)
             

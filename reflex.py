@@ -55,3 +55,28 @@ class OracleReflex(Reflex):
     def compute(self, obs, priv=None):
         tau = priv["tau_teacher"]
         return tau, tau
+
+
+class NoisyObs(Reflex):
+    # Sensor noise as a wrapper: the inner reflex sees noisy q / dq (and optionally tau_prev),
+    # the sim and the OSC still see the true state. run_episode doesn't change.
+    # Seeded and reset per episode, so the same seed gives the same noise every run.
+    # e_p / e_o stay clean: no current reflex uses them.
+
+    def __init__(self, inner, q_std=0.0, dq_std=0.0, tau_std=0.0, seed=0):
+        self.inner = inner
+        self.name = inner.name
+        self.privileged = inner.privileged
+        self.std = {"q": q_std, "dq": dq_std, "tau_prev": tau_std}
+        self.seed = seed
+        self.reset()
+
+    def reset(self):
+        self.rng = np.random.default_rng(self.seed)
+        self.inner.reset()
+
+    def compute(self, obs, priv=None):
+        noisy = dict(obs)   # new dict: the caller's obs is left untouched
+        for key, std in self.std.items():
+            noisy[key] = obs[key] + self.rng.normal(0.0, std, 7)
+        return self.inner.compute(noisy, priv)
