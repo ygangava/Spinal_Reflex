@@ -87,21 +87,52 @@ jp = np.zeros((3, m.nv))
 jr = np.zeros((3, m.nv))
 M_full = np.zeros((m.nv, m.nv))
 
+# The controller's model of the robot (its "belief"): same XML, separate MjModel.
+# m is the true physics; plant_mismatch() changes m only, so the controller keeps the nominal masses,
+# like a real robot running a datasheet model. The observer loads its own copy of the same nominal XML.
+m_ctrl = mujoco.MjModel.from_xml_path(MODEL)
+d_ctrl = mujoco.MjData(m_ctrl)
 
-def full_inertia(dst):
+
+def full_inertia(dst, model=m, data=d):
     """Dense joint-space inertia matrix. mj_fullM's signature changed across MuJoCo versions."""
-    if hasattr(d, "qM"):
-        mujoco.mj_fullM(m, dst, d.qM)    # older MuJoCo
+    if hasattr(data, "qM"):
+        mujoco.mj_fullM(model, dst, data.qM)    # older MuJoCo
     else:
-        mujoco.mj_fullM(m, d, dst)       # newer MuJoCo (3.16+)
+        mujoco.mj_fullM(model, data, dst)       # newer MuJoCo (3.16+)
+
+
+@contextlib.contextmanager
+def plant_mismatch(payload_kg=0.0, link_mass_scale=1.0):
+    """Change the TRUE physics for the duration of a `with` block; the controller/observer models don't change.
+
+    payload_kg: unknown mass added at the hand's COM (an object in the gripper).
+    link_mass_scale: links 1-7 mass and inertia scaled together (wrong datasheet masses).
+    """
+    saved = m.body_mass.copy(), m.body_inertia.copy()
+    links = [m.body(f"link{i}").id for i in range(1, 8)]
+    m.body_mass[links] *= link_mass_scale
+    m.body_inertia[links] *= link_mass_scale
+    m.body_mass[hand] += payload_kg
+    try:
+        yield
+    finally:
+        m.body_mass[:], m.body_inertia[:] = saved
 
 
 def osc(g):
     """Return OSC joint torques (7,) plus position and orientation error."""
     # Jacobian: maps joint velocities -> hand linear (jp) and angular (jr) velocity. Arm = first 7 dofs.
+    # Kinematics come from the plant: masses don't change geometry, so belief and truth agree here.
     mujoco.mj_jacBody(m, d, jp, jr, hand)
     J = np.vstack([jp, jr])[:, :7]                       # 6x7
-    full_inertia(M_full)
+
+    # Dynamics (M, gravity, Coriolis) come from the controller's model at the measured state.
+    # Same two stages mj_step1 runs on the plant: position (-> M) and velocity (-> bias forces).
+    d_ctrl.qpos[:], d_ctrl.qvel[:] = d.qpos, d.qvel
+    mujoco.mj_fwdPosition(m_ctrl, d_ctrl)
+    mujoco.mj_fwdVelocity(m_ctrl, d_ctrl)
+    full_inertia(M_full, m_ctrl, d_ctrl)
     M = M_full[:7, :7]                                   # joint-space inertia
     Minv = np.linalg.inv(M)
     Lam = np.linalg.pinv(J @ Minv @ J.T)                 # task-space inertia; pinv survives singularities
@@ -122,7 +153,7 @@ def osc(g):
     N = np.eye(7) - J.T @ Lam @ J @ Minv
     tau_null = M @ (g["kp_null"] * (q0 - d.qpos[:7]) - g["kd_null"] * dq)
 
-    tau = J.T @ F + N @ tau_null + d.qfrc_bias[:7]       # qfrc_bias = gravity + Coriolis compensation
+    tau = J.T @ F + N @ tau_null + d_ctrl.qfrc_bias[:7]  # qfrc_bias = gravity + Coriolis compensation (believed)
     return tau, e_p, e_o
 
 # RUN ORiginally
