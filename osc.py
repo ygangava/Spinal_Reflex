@@ -144,8 +144,11 @@ def osc(g):
     e_o = (R.from_matrix(R_d) * R_cur.inv()).as_rotvec()  # world-frame axis*angle from current to target
 
     
+    # Planned hand acceleration [lin, ang]. Zero while holding a fixed target; a moving target fills it in.
+    a_d = np.zeros(6)
+
     a = np.r_[g["kp_pos"] * e_p - g["kd_pos"] * v[:3],
-              g["kp_ori"] * e_o - g["kd_ori"] * v[3:]]
+              g["kp_ori"] * e_o - g["kd_ori"] * v[3:]] + a_d
 
     F = Lam @ a                                          # task wrench
 
@@ -153,8 +156,14 @@ def osc(g):
     N = np.eye(7) - J.T @ Lam @ J @ Minv
     tau_null = M @ (g["kp_null"] * (q0 - d.qpos[:7]) - g["kd_null"] * dq)
 
-    tau = J.T @ F + N @ tau_null + d_ctrl.qfrc_bias[:7]  # qfrc_bias = gravity + Coriolis compensation (believed)
-    return tau, e_p, e_o
+    bias = d_ctrl.qfrc_bias[:7].copy()                   # gravity + Coriolis compensation (believed)
+    tau = J.T @ F + N @ tau_null + bias
+
+    # Feedforward only (no feedback terms): the torque the controller's model says the plan needs with no push.
+    # Replaces the constant hold torque in the tau_prev feature on a moving arm (SNN_LEARN.md Q7, option C).
+    # At a hold, a_d = 0, so this is just the bias, which equals tau at tick 0.
+    tau_ff = J.T @ (Lam @ a_d) + bias
+    return tau, e_p, e_o, tau_ff
 
 # RUN ORiginally
 # created the ppush time, force, steps based off wanted dur, viewer, for range 
@@ -170,6 +179,7 @@ LOG_FIELDS = {
     "ee_pos": 3,                     # hand position (target is x_d, constant for now)
     "q": 7, "dq": 7,                 # joint state
     "tau_base": 7,                   # OSC torque
+    "tau_ff": 7,                     # OSC feedforward only (model torque the plan needs, no feedback terms)
     "tau_teacher": 7,                # -J^T F: torque that exactly cancels the push (training label, oracle)
     "tau_res_new": 7,                # reflex torque computed this tick (after gain), before the latency queue
     "tau_res": 7,                    # reflex torque applied this tick (computed reflex_delay ticks ago)
@@ -219,7 +229,7 @@ def run_episode(p, gains=DEFAULT_GAINS, reflex=None, reflex_gain=1.0, reflex_del
 
             # Controller sees the current state
             mujoco.mj_step1(m, d)
-            tau, e_p, e_o = osc(gains)
+            tau, e_p, e_o, tau_ff = osc(gains)
 
             # Push this tick and the torque that cancels it (before the reflex, so the oracle can use it this tick)
             f = push(k, p)
@@ -227,7 +237,7 @@ def run_episode(p, gains=DEFAULT_GAINS, reflex=None, reflex_gain=1.0, reflex_del
 
             # Reflex sees only what a real robot could sense; only a privileged reflex also gets the teacher
             obs = {"k": k, "q": d.qpos[:7].copy(), "dq": d.qvel[:7].copy(),
-                   "e_p": e_p, "e_o": e_o, "tau_base": tau,
+                   "e_p": e_p, "e_o": e_o, "tau_base": tau, "tau_ff": tau_ff,
                    # Previous applied motor torque is observable, unlike the push force.
                    # At reset the arm is assumed to be holding its initial bias torque.
                    "tau_prev": tau.copy() if prev is None else prev.copy()}
@@ -255,6 +265,7 @@ def run_episode(p, gains=DEFAULT_GAINS, reflex=None, reflex_gain=1.0, reflex_del
             log["ee_pos"][k] = d.xpos[hand]
             log["q"][k], log["dq"][k] = d.qpos[:7], d.qvel[:7]
             log["tau_base"][k], log["tau_teacher"][k] = tau, tau_teacher
+            log["tau_ff"][k] = tau_ff
             log["tau_res_new"][k], log["tau_res"][k], log["reflex_est"][k] = tau_res_new, tau_res, est
             log["tau_cmd"][k] = cmd
             log["f_push"][k] = f

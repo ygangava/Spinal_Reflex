@@ -14,10 +14,11 @@ from scripts.mlp import parallel, development_cases
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "models/mlp_history.npz"
+SNN_PATH = ROOT / "models/snn.npz"
 OUT = ROOT / "results/noise"
 DQ_STDS = [0.0, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2]   # rad/s
 CONTROLLERS = ["OSC", "Observer K=100", "Observer K=1000", "MLP", "Delta MLP k=0.01", "Delta MLP k=0.1",
-               "Delta MLP k=0.01 floor"]
+               "Delta MLP k=0.01 floor", "SNN", "SNN floor"]
 FLOOR_SIGMAS = 6   # thresholds >= 6 sigma of each feature's noise: calm noise almost never fires
 
 
@@ -27,16 +28,36 @@ def make_reflex(name, q_std, dq_std):
     from mlp_reflex import MLPModel, MLPReflex
     from delta_mlp_reflex import DeltaMLPReflex, feature_noise
     from observer_reflex import MomentumObserver
+    from snn import SNNModel, SNNReflex
     if name == "OSC":
         return NoReflex()
     if name.startswith("Observer"):
         return MomentumObserver(float(name.split("=")[1]))
+    if name.startswith("SNN"):
+        # Same floor rule as the delta MLP; the SNN's k (0.1) was fixed at training
+        floor = FLOOR_SIGMAS * feature_noise(q_std, dq_std, DT) if name.endswith("floor") else None
+        return SNNReflex(SNNModel.load(SNN_PATH), floor)
     model = MLPModel.load(MODEL_PATH)
     if name == "MLP":
         return MLPReflex(model, DT)
     k = float(name.split("=")[1].split()[0])
     floor = FLOOR_SIGMAS * feature_noise(q_std, dq_std, DT) if name.endswith("floor") else None
     return DeltaMLPReflex(model, k, floor)
+
+
+def read_rows(path, text_keys):
+    """Saved CSV rows back as dicts, with numbers as floats (so --only can reuse other controllers' rows)."""
+    with path.open() as f:
+        return [{k: (v if k in text_keys else float(v)) for k, v in row.items()} for row in csv.DictReader(f)]
+
+
+def parse_only(controllers):
+    # --only NAME ...: rerun just these controllers and reuse the saved CSV rows for the rest.
+    # Only valid while the other controllers' code is unchanged since that CSV was written.
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", nargs="+", choices=controllers, help="rerun only these; reuse saved rows for the rest")
+    return ap.parse_args().only
 
 
 def run_one(job):
@@ -52,8 +73,9 @@ def run_one(job):
     # Calm = before the push, skipping the first 200 ms so start-up transients don't count
     calm = slice(round(0.2 / DT), p.onset_tick)
     push = slice(p.onset_tick, p.end_tick)
-    # MACs/tick: only the delta MLP varies; the others cost the same every tick
-    ops = np.array(inner.ops) if hasattr(inner, "ops") else np.full(len(e), np.nan)
+    # Ops/tick: only the delta MLP and the SNN vary; the others cost the same every tick.
+    # SNN: the lazy count (adds only, no leak), comparable to the delta MLP counting work only on event ticks.
+    ops = np.array(getattr(inner, "ops_lazy", getattr(inner, "ops", np.full(len(e), np.nan))))
     return {"kind": kind, "controller": name, "dq_std": dq_std,
             "peak_mm": e[p.onset_tick:].max(), "auc_mm_s": e[p.onset_tick:].sum() * DT,
             "calm_jitter_mm": e[calm].mean(), "calm_ops": ops[calm].mean(), "push_ops": ops[push].mean()}
@@ -61,11 +83,15 @@ def run_one(job):
 
 def main():
     from osc import DT
+    only = parse_only(CONTROLLERS)
     cases = development_cases([100], DT)
     # Noise seed differs per episode but is the same across controllers: paired comparison
     jobs = [(kind, p, name, s, 1000 * i) for i, (_, kind, p) in enumerate(cases)
-            for name in CONTROLLERS for s in DQ_STDS]
+            for name in (only or CONTROLLERS) for s in DQ_STDS]
     rows = parallel(run_one, jobs, 4)
+    if only:
+        rows = [r for r in read_rows(OUT / "noise_sweep.csv", ("kind", "controller"))
+                if r["controller"] not in only] + rows
 
     OUT.mkdir(parents=True, exist_ok=True)
     with (OUT / "noise_sweep.csv").open("w", newline="") as f:

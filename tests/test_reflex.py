@@ -96,7 +96,9 @@ class SpyReflex(Reflex):
 def test_no_cheating():
     r = SpyReflex()
     run_episode(sustained_push(), reflex=r, t_end=0.7)
-    assert all(keys == {"k", "q", "dq", "e_p", "e_o", "tau_base", "tau_prev"} and priv is None for keys, priv in r.seen)
+    # tau_ff is allowed: the controller computes it from its own model + measured state + plan, no push info
+    assert all(keys == {"k", "q", "dq", "e_p", "e_o", "tau_base", "tau_ff", "tau_prev"} and priv is None
+               for keys, priv in r.seen)
     assert SpyReflex().step({}, 1.0, priv={"tau_teacher": np.ones(7)})[0].sum() == 0
 
 

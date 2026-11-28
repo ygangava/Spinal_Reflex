@@ -110,7 +110,15 @@ class SNNReflex(Reflex):
         self.event_size = theta / model.x_scale
         model_dt = float(model.metadata["dt"])
 
-        self.features = CausalFeatures(model.metadata["features"], model_dt)
+        # W_in was trained with one event = θ_k = k·x_scale. With a floor, one event = θ ≥ θ_k (a bigger change),
+        # so scale each channel's row by θ/θ_k (the delta MLP's event_size idea). Folded into the weights once
+        # here: no extra work per event, and in RTL it's just a different weight ROM per noise level.
+        # Without a floor the ratio is exactly 1, so this changes nothing.
+        ratio = theta / (model.k * model.x_scale)               # (28,)
+        self.w_in = model.w_in * np.r_[ratio, ratio][:, None]   # ON rows 0–27 and OFF rows 28–55 get the same ratio
+
+        self.features = CausalFeatures(model.metadata["features"], model_dt,
+                                       model.metadata.get("torque_ref", "hold"))   # old models: "hold"
         self.enc = SendOnDelta(theta)
 
         # acc limit = torque_limit / y_scale   (clip acc itself → no windup; RTL = saturating register)
@@ -134,7 +142,7 @@ class SNNReflex(Reflex):
     def compute(self, obs, priv=None):
         x = self.features.step(obs)
         on, off = self.enc.step(x)
-        self.v, self.acc, spike, ops = snn_step(self.v, self.acc, on, off, self.model.w_in, self.model.w_out, self.model.beta)
+        self.v, self.acc, spike, ops = snn_step(self.v, self.acc, on, off, self.w_in, self.model.w_out, self.model.beta)
         # clip acc to ± its limit
         self.acc = np.clip(self.acc, -self.acc_limit, self.acc_limit)
         # torque = acc · y_scale   (already within torque_limit after the acc clip)

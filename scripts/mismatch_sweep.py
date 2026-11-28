@@ -12,9 +12,11 @@ from pathlib import Path
 import numpy as np
 
 from scripts.mlp import parallel, development_cases
+from scripts.noise_sweep import read_rows, parse_only
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "models/mlp_history.npz"
+SNN_PATH = ROOT / "models/snn.npz"
 OUT = ROOT / "results/mismatch"
 # (label, plant_mismatch kwargs). Franka's rated payload is 3 kg.
 CONDITIONS = [("nominal", {}),
@@ -23,7 +25,7 @@ CONDITIONS = [("nominal", {}),
               ("payload 2 kg", {"payload_kg": 2.0}),
               ("links x0.8", {"link_mass_scale": 0.8}),
               ("links x1.2", {"link_mass_scale": 1.2})]
-CONTROLLERS = ["OSC", "Observer K=100", "Observer K=1000", "MLP", "Delta MLP k=0.01", "Oracle"]
+CONTROLLERS = ["OSC", "Observer K=100", "Observer K=1000", "MLP", "Delta MLP k=0.01", "SNN", "Oracle"]
 
 
 def make_reflex(name):
@@ -32,8 +34,11 @@ def make_reflex(name):
     from mlp_reflex import MLPModel, MLPReflex
     from delta_mlp_reflex import DeltaMLPReflex
     from observer_reflex import MomentumObserver
+    from snn import SNNModel, SNNReflex
     if name == "OSC":
         return NoReflex(), 0
+    if name == "SNN":
+        return SNNReflex(SNNModel.load(SNN_PATH)), 1   # +1 tick, same as the MLPs
     if name == "Oracle":
         return OracleReflex(), 2   # +1 tick: the oracle sees the force a tick before sensors can (as in scripts/mlp.py)
     if name.startswith("Observer"):
@@ -57,7 +62,8 @@ def run_one(job):
     calm = slice(round(0.5 / DT), p.onset_tick)
     push = slice(p.onset_tick, p.end_tick)
     deviation = np.linalg.norm(e_vec[p.onset_tick:] - e_vec[p.onset_tick], axis=1)
-    ops = np.array(r.ops) if hasattr(r, "ops") else np.full(len(e), np.nan)
+    # SNN: the lazy count (adds only, no leak)
+    ops = np.array(getattr(r, "ops_lazy", getattr(r, "ops", np.full(len(e), np.nan))))
     return {"kind": kind, "controller": name, "condition": label,
             "calm_mm": e[calm].mean(), "push_peak_mm": deviation.max(), "peak_mm": e[p.onset_tick:].max(),
             "calm_ops": ops[calm].mean(), "push_ops": ops[push].mean()}
@@ -65,10 +71,14 @@ def run_one(job):
 
 def main():
     from osc import DT
+    only = parse_only(CONTROLLERS)
     cases = development_cases([100], DT)
     jobs = [(kind, p, name, label, kw) for _, kind, p in cases
-            for name in CONTROLLERS for label, kw in CONDITIONS]
+            for name in (only or CONTROLLERS) for label, kw in CONDITIONS]
     rows = parallel(run_one, jobs, 4)
+    if only:
+        rows = [r for r in read_rows(OUT / "mismatch_sweep.csv", ("kind", "controller", "condition"))
+                if r["controller"] not in only] + rows
 
     OUT.mkdir(parents=True, exist_ok=True)
     with (OUT / "mismatch_sweep.csv").open("w", newline="") as f:

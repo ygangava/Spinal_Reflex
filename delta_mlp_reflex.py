@@ -25,7 +25,8 @@ class DeltaMLPReflex(Reflex):
         self.event_size = theta / model.x_scale
         model_dt = float(model.metadata["dt"])
 
-        self.features = CausalFeatures(model.metadata["features"], model_dt)
+        self.features = CausalFeatures(model.metadata["features"], model_dt,
+                                       model.metadata.get("torque_ref", "hold"))   # old models: "hold"
         self.enc = SendOnDelta(theta)
         
         # self.torque, ticks, compute_ticks are created inside reset, so need to call to make them exist now
